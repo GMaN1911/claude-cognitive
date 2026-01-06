@@ -27,11 +27,12 @@ fi
 
 # Check 3: Project .claude exists
 checks_total=$((checks_total + 1))
-if [ -d "/workspace/.claude" ] && [ -f "/workspace/.claude/CLAUDE.md" ]; then
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+if [ -d "$WORKSPACE_DIR/.claude" ] && [ -f "$WORKSPACE_DIR/.claude/CLAUDE.md" ]; then
     echo "✓ Project .claude directory initialized"
     checks_passed=$((checks_passed + 1))
 else
-    echo "✗ Project .claude not found in /workspace/"
+    echo "✗ Project .claude not found in $WORKSPACE_DIR/"
 fi
 
 # Check 4: Instance ID set

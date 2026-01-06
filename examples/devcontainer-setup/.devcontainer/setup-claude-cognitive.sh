@@ -69,13 +69,14 @@ print("✓ Hooks configured successfully")
 PYTHON
 
 # Initialize project .claude directory if it doesn't exist
-if [ ! -d "/workspace/.claude" ]; then
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+if [ ! -d "$WORKSPACE_DIR/.claude" ]; then
     echo "Initializing project .claude directory..."
-    mkdir -p /workspace/.claude/{systems,modules,integrations,pool}
+    mkdir -p "$WORKSPACE_DIR/.claude/{systems,modules,integrations,pool}"
     
     # Copy templates
-    cp -r "$HOME/.claude-cognitive/templates/"* /workspace/.claude/
-    echo "✓ Templates copied to /workspace/.claude/"
+    cp -r "$HOME/.claude-cognitive/templates/"* "$WORKSPACE_DIR/.claude/"
+    echo "✓ Templates copied to $WORKSPACE_DIR/.claude/"
 else
     echo "Project .claude directory already exists"
 fi
@@ -84,7 +85,7 @@ echo ""
 echo "✓ claude-cognitive setup complete!"
 echo "  - Scripts installed to ~/.claude/scripts/"
 echo "  - Hooks configured in ~/.claude/settings.json"
-echo "  - Project templates in /workspace/.claude/"
+echo "  - Project templates in $WORKSPACE_DIR/.claude/"
 echo ""
 echo "Next steps:"
 echo "  1. Edit /workspace/.claude/CLAUDE.md with your project info"
