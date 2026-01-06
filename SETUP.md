@@ -18,6 +18,8 @@
 
 **Time estimate:** 10-15 minutes
 
+**Using Docker or DevContainers?** See [Docker & DevContainer Setup Guide](./docs/guides/docker-devcontainer-setup.md)
+
 ---
 
 ## Step 1: Install Scripts (3 minutes)
