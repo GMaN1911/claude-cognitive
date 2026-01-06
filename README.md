@@ -335,6 +335,7 @@ claude-cognitive/
 │
 └── examples/
     ├── small-project/            # Simple example
+    ├── devcontainer-setup/       # Docker & DevContainer config
     ├── monorepo/                 # Complex structure
     └── mirrorbot-sanitized/      # Real-world 50k+ line example
 ```
@@ -362,6 +363,7 @@ claude-cognitive/
 
 ### Guides
 - [Getting Started](./docs/guides/getting-started.md) - First 15 minutes
+- [Docker & DevContainers](./docs/guides/docker-devcontainer-setup.md) - Container environments
 - [Large Codebases](./docs/guides/large-codebases.md) - 50k+ lines
 - [Team Setup](./docs/guides/team-setup.md) - Multiple developers
 - [Migration](./docs/guides/migration.md) - Adding to existing project
