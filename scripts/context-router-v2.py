@@ -37,6 +37,76 @@ except ImportError:
     USAGE_TRACKING_AVAILABLE = False
 
 # ============================================================================
+# DOCS ROOT RESOLUTION
+# ============================================================================
+
+def resolve_docs_root() -> Path:
+    """
+    Resolve documentation root with correct priority order.
+
+    Priority:
+    1. CONTEXT_DOCS_ROOT environment variable (explicit override)
+    2. Project-local .claude/ directory (if exists with .md files)
+    3. Global ~/.claude/ directory (fallback)
+
+    Returns: Path to docs root
+    Raises: FileNotFoundError if no valid docs directory found
+    """
+    import glob
+
+    # Priority 1: Explicit environment variable
+    if env_root := os.getenv('CONTEXT_DOCS_ROOT'):
+        env_path = Path(env_root).expanduser().resolve()
+        if env_path.is_dir():
+            print(f"ℹ Using CONTEXT_DOCS_ROOT: {env_path}", file=sys.stderr)
+            return env_path
+        else:
+            print(f"⚠ CONTEXT_DOCS_ROOT set but not found: {env_path}", file=sys.stderr)
+
+    # Priority 2: Project-local .claude/ (more explicit check)
+    project_claude = Path.cwd() / ".claude"
+    if project_claude.is_dir():
+        # Check if it has any .md files (not just exists)
+        md_files = list(project_claude.glob("**/*.md"))
+        if md_files:
+            print(f"ℹ Using project-local .claude: {project_claude}", file=sys.stderr)
+            print(f"  Found {len(md_files)} .md files", file=sys.stderr)
+            return project_claude
+        else:
+            print(f"⚠ Project .claude/ exists but has no .md files: {project_claude}", file=sys.stderr)
+
+    # Priority 3: Global ~/.claude/ (last resort)
+    global_claude = Path.home() / ".claude"
+    if global_claude.is_dir():
+        md_files = list(global_claude.glob("**/*.md"))
+        if md_files:
+            print(f"ℹ Using global ~/.claude: {global_claude}", file=sys.stderr)
+            print(f"  Found {len(md_files)} .md files", file=sys.stderr)
+            return global_claude
+        else:
+            print(f"⚠ Global ~/.claude/ exists but has no .md files", file=sys.stderr)
+
+    # Priority 4: Fail with helpful error
+    raise FileNotFoundError(
+        "\n"
+        "═══════════════════════════════════════════════════════════════\n"
+        "ERROR: No .claude/ directory with documentation found.\n"
+        "\n"
+        "Please create .claude/ in your project root and add .md files:\n"
+        "  mkdir -p .claude/\n"
+        "  echo '# My Project' > .claude/README.md\n"
+        "\n"
+        "Or set explicit path:\n"
+        "  export CONTEXT_DOCS_ROOT=/path/to/docs\n"
+        "\n"
+        "Priority order:\n"
+        "  1. CONTEXT_DOCS_ROOT environment variable\n"
+        "  2. Project-local .claude/ (current directory)\n"
+        "  3. Global ~/.claude/ (home directory)\n"
+        "═══════════════════════════════════════════════════════════════\n"
+    )
+
+# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -622,10 +692,12 @@ def main():
     
     if not prompt.strip():
         return
-    
-    # Determine docs root (configurable via env or default)
-    # ALWAYS use global ~/.claude (enforced after documentation consolidation)
-    docs_root = Path(os.environ.get("CONTEXT_DOCS_ROOT", str(Path.home() / ".claude")))
+
+    # Determine docs root with proper priority order
+    # Priority 1: Explicit CONTEXT_DOCS_ROOT environment variable
+    # Priority 2: Project-local .claude/ (if exists with .md files)
+    # Priority 3: Global ~/.claude/
+    docs_root = resolve_docs_root()
 
     # Load state
     state_file = get_state_file()
