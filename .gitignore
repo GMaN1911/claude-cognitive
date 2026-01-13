@@ -28,6 +28,10 @@ Thumbs.db
 .claude/attn_state.json
 .claude/pool/instance_state.jsonl
 
+# Hologram state files (generated at runtime, not tracked)
+.claude/hologram_state.json
+.claude/hologram_history.jsonl
+
 # Usage tracking data files (generated, not tracked)
 .claude/usage_stats.json
 .claude/usage_history.jsonl
