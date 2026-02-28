@@ -1,26 +1,81 @@
-# Claude Cognitive - 15-Minute Setup
+# Claude Cognitive - Setup Guide
 
-**Goal:** Get working memory for Claude Code in 15 minutes or less.
+**Goal:** Get working memory for Claude Code in minutes.
 
 **What you'll have:**
 - Context router with attention dynamics
 - Pool coordinator for multi-instance work
 - Project-local configuration
 - Self-monitoring tools
+- Metrics and analytics (v1.3)
 
 ---
 
 ## Prerequisites
 
 - Claude Code installed and working
-- Basic terminal/command-line familiarity
-- A project with 100+ files (or use our examples)
-
-**Time estimate:** 10-15 minutes
+- Python 3.8+
+- A project you want to enhance
 
 ---
 
-## Step 1: Install Scripts (3 minutes)
+## Option A: One-Command Install (Recommended, ~5 minutes)
+
+The fastest way to get started. One script installs everything, then the setup wizard configures your project.
+
+### 1. Install
+
+```bash
+git clone https://github.com/GMaN1911/claude-cognitive.git ~/.claude-cognitive
+~/.claude-cognitive/install.sh
+```
+
+That's it. The install script:
+- Copies hook scripts to `~/.claude/scripts/`
+- Installs the metrics framework
+- Copies skills (`/cognitive-setup`, `/cognitive-status`, `/cognitive-metrics`)
+- Configures Claude Code hooks (non-destructive merge, backs up existing settings)
+
+### 2. Run the Setup Wizard
+
+```bash
+cd /path/to/your/project
+claude
+```
+
+Then in Claude Code:
+```
+/cognitive-setup init
+```
+
+The wizard will:
+1. **Analyze your project** — detect languages, frameworks, key modules
+2. **Generate keyword mappings** — create `keywords.json` automatically
+3. **Create documentation stubs** — generate fractal docs for your codebase
+4. **Verify hooks** — confirm Claude Code's hook system is properly configured
+5. **Validate everything** — run dry-run tests to confirm it works
+
+Each step is presented for your review before any files are written.
+
+### 3. Verify
+
+```
+/cognitive-status
+```
+
+This checks that all files are in place, hooks are configured, and the context router is working.
+
+### Alternative: Skip the install script entirely
+
+If you're already in a Claude Code session, the `/cognitive-setup init` wizard can install everything for you. It detects missing scripts and hooks and handles installation automatically — no separate install step needed. Just make sure the skill is available (either from a cloned repo or copied to your project's `.claude/skills/`).
+
+---
+
+## Option B: Manual Setup (~15 minutes)
+
+For those who prefer full control over every step.
+
+### Step 1: Install Scripts (3 minutes)
 
 ### Clone Repository
 
@@ -89,21 +144,24 @@ if "hooks" not in settings:
 settings["hooks"]["UserPromptSubmit"] = [{
     "hooks": [
         {"type": "command", "command": "python3 ~/.claude/scripts/context-router-v2.py"},
-        {"type": "command", "command": "python3 ~/.claude/scripts/pool-auto-update.py"}
+        {"type": "command", "command": "python3 ~/.claude/scripts/pool-auto-update.py"},
+        {"type": "command", "command": "python3 ~/.claude/scripts/metrics/collector.py prompt"}
     ]
 }]
 
 # Add SessionStart hook
 settings["hooks"]["SessionStart"] = [{
     "hooks": [
-        {"type": "command", "command": "python3 ~/.claude/scripts/pool-loader.py"}
+        {"type": "command", "command": "python3 ~/.claude/scripts/pool-loader.py"},
+        {"type": "command", "command": "python3 ~/.claude/scripts/metrics/collector.py session-start"}
     ]
 }]
 
 # Add Stop hook
 settings["hooks"]["Stop"] = [{
     "hooks": [
-        {"type": "command", "command": "python3 ~/.claude/scripts/pool-extractor.py"}
+        {"type": "command", "command": "python3 ~/.claude/scripts/pool-extractor.py"},
+        {"type": "command", "command": "python3 ~/.claude/scripts/metrics/collector.py session-end"}
     ]
 }]
 
@@ -126,21 +184,24 @@ Edit `~/.claude/settings.json`:
       {
         "hooks": [
           {"type": "command", "command": "python3 ~/.claude/scripts/context-router-v2.py"},
-          {"type": "command", "command": "python3 ~/.claude/scripts/pool-auto-update.py"}
+          {"type": "command", "command": "python3 ~/.claude/scripts/pool-auto-update.py"},
+          {"type": "command", "command": "python3 ~/.claude/scripts/metrics/collector.py prompt"}
         ]
       }
     ],
     "SessionStart": [
       {
         "hooks": [
-          {"type": "command", "command": "python3 ~/.claude/scripts/pool-loader.py"}
+          {"type": "command", "command": "python3 ~/.claude/scripts/pool-loader.py"},
+          {"type": "command", "command": "python3 ~/.claude/scripts/metrics/collector.py session-start"}
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          {"type": "command", "command": "python3 ~/.claude/scripts/pool-extractor.py"}
+          {"type": "command", "command": "python3 ~/.claude/scripts/pool-extractor.py"},
+          {"type": "command", "command": "python3 ~/.claude/scripts/metrics/collector.py session-end"}
         ]
       }
     ]
@@ -275,21 +336,37 @@ cd /path/to/your/project
 claude
 ```
 
-### Verify Context Router
+### Check Attention State
 
-**First message:**
-```
-Show me the project structure
-```
+The context router runs silently in the background (its output goes to Claude's context, not your terminal). To see what it's doing, use:
 
-**Look for:**
 ```
-╔══ ATTENTION STATE [Turn 1] ══╗
-║ 🔥 Hot: 0 │ 🌡️ Warm: 0 │ ❄️ Cold: X ║
-...
+/cognitive-state
 ```
 
-This means context router is working!
+Or run the standalone script directly:
+```bash
+python3 ~/.claude/scripts/cognitive-state.py
+```
+
+You should see something like:
+```
+Turn 1  |  🔥 0 HOT  🌡️ 0 WARM  ❄️ 6 COLD  |  2026-02-28T...
+```
+
+### Trigger Context Activation
+
+**Mention something relevant to your project:**
+```
+How does the authentication system work?
+```
+
+Then check state again:
+```
+/cognitive-state
+```
+
+HOT/WARM counts should increase for files with matching keywords.
 
 ### Verify Pool Coordinator
 
@@ -299,21 +376,6 @@ python3 ~/.claude/scripts/pool-query.py --since 10m
 ```
 
 Should show recent activity (or empty if no pool blocks yet).
-
-### Trigger Context Activation
-
-**Mention something in your code:**
-```
-How does the authentication system work?
-```
-
-**Next message check:**
-```
-╔══ ATTENTION STATE [Turn 2] ══╗
-║ 🔥 Hot: 1 │ 🌡️ Warm: X │ ❄️ Cold: X ║
-```
-
-HOT count should increase!
 
 ✅ **Checkpoint:** System working
 
@@ -364,8 +426,8 @@ Edit with your auth system details.
 
 ### Context Router Working?
 
-- [ ] See "ATTENTION STATE" header in Claude responses
-- [ ] HOT count increases when you mention things
+- [ ] `/cognitive-state` shows turn count, HOT/WARM/COLD counts
+- [ ] HOT count increases when you mention relevant topics
 - [ ] Files decay when not mentioned (WARM → COLD)
 
 ### Pool Coordinator Working?
@@ -409,6 +471,22 @@ Should see your test entry!
 
 ## Next Steps
 
+### Monitor Effectiveness
+
+Use the metrics system to track how well claude-cognitive is working:
+
+```
+/cognitive-metrics summary
+```
+
+After a few sessions, run a full analysis:
+
+```
+/cognitive-metrics full
+```
+
+This shows token savings, keyword effectiveness, and actionable recommendations.
+
 ### Learn More
 
 - [README.md](./README.md) - Full documentation
@@ -420,12 +498,21 @@ Should see your test entry!
 
 **Context Router:**
 - Edit `.claude/keywords.json` to add project-specific keywords, co-activation rules, and pinned files
-- Edit `~/.claude/scripts/context-router-v2.py` to adjust decay rates (lines 43-51) or thresholds
+- Edit `~/.claude/scripts/context-router-v2.py` to adjust decay rates (search for `DECAY_RATES`) or thresholds (search for `HOT_THRESHOLD`)
+- Use `python3 ~/.claude/scripts/context-router-v2.py --validate "your prompt"` to test keyword activation
 
 **Pool Coordinator:**
 - Edit `~/.claude/scripts/pool-auto-update.py`
-- Adjust cooldown (line 41)
-- Add detection patterns (lines 48-91)
+- Adjust cooldown (search for `COOLDOWN`)
+- Add detection patterns (search for `PATTERN`)
+
+### Diagnose Issues
+
+```
+/cognitive-status
+```
+
+This checks file presence, hook configuration, attention state, and metrics collection. Reports clear PASS/FAIL/WARN for each component.
 
 ### Advanced Setup
 
@@ -443,17 +530,34 @@ Should see your test entry!
 
 ## Troubleshooting
 
-### "No ATTENTION STATE header"
+### "Context Router - Configuration Required"
 
-**Cause:** Context router not running
+**Cause:** No `.claude/` directory with documentation files found
+
+**Fix:**
+```bash
+# Run the setup wizard
+/cognitive-setup init
+
+# Or manually create the directory
+mkdir -p .claude/{systems,modules,integrations}
+# Add at least one .md file and keywords.json
+```
+
+### `/cognitive-state` shows "No attention state found"
+
+**Cause:** Context router hasn't run yet, or no `.claude/attn_state.json` exists
 
 **Fix:**
 ```bash
 # Check hook is configured
 grep context-router ~/.claude/settings.json
 
-# Test manually
-echo '{"prompt":"test"}' | python3 ~/.claude/scripts/context-router-v2.py
+# Validate with a test prompt
+python3 ~/.claude/scripts/context-router-v2.py --validate "your project keywords here"
+
+# Send a prompt in Claude Code to trigger the first run, then check again
+/cognitive-state
 ```
 
 ### "Pool query shows nothing"
@@ -489,7 +593,7 @@ chmod +x ~/.claude/scripts/*.py
 
 **You're ready when:**
 
-✅ Context router shows attention state
+✅ `/cognitive-state` shows attention state
 ✅ Pool query runs without errors
 ✅ Instance ID set and visible
 ✅ `.claude/CLAUDE.md` customized for your project
