@@ -64,71 +64,38 @@ Files **decay** when not mentioned, **activate** on keywords, and **co-activate*
 
 ## Quick Start
 
-### 1. Install Scripts
+### Automated Setup (Recommended)
 
 ```bash
-# Clone to your home directory
+# 1. Clone and install scripts
 cd ~
 git clone https://github.com/GMaN1911/claude-cognitive.git .claude-cognitive
+mkdir -p ~/.claude/scripts
+cp .claude-cognitive/scripts/*.py ~/.claude/scripts/
+cp -r .claude-cognitive/scripts/metrics/ ~/.claude/scripts/metrics/
 
-# Copy scripts
-cp -r .claude-cognitive/scripts ~/.claude/scripts/
+# 2. Install skills
+mkdir -p ~/.claude/skills
+cp -r .claude-cognitive/.claude/skills/cognitive-setup ~/.claude/skills/
+cp -r .claude-cognitive/.claude/skills/cognitive-status ~/.claude/skills/
+cp -r .claude-cognitive/.claude/skills/cognitive-metrics ~/.claude/skills/
 
-# Set up hooks (adds to existing config)
-cat .claude-cognitive/hooks-config.json >> ~/.claude/settings.json
-```
-
-> **Note:** The repo contains a `.claude-dev/` directory for development/dogfooding purposes only. **Do not** copy this to your projects—it's not part of the user-facing installation. Use your own project-local `.claude/` directory instead (see step 2).
-
-### 2. Initialize Your Project
-
-```bash
+# 3. Navigate to your project and run the setup wizard
 cd /path/to/your/project
-
-# Create .claude directory
-mkdir -p .claude/{systems,modules,integrations,pool}
-
-# Copy templates
-cp -r ~/.claude-cognitive/templates/* .claude/
-
-# Edit .claude/CLAUDE.md with your project info
-# Edit .claude/systems/*.md to describe your architecture
-```
-
-### 3. Set Instance ID
-
-```bash
-# Add to ~/.bashrc for persistence:
-export CLAUDE_INSTANCE=A
-
-# Or per-terminal:
-export CLAUDE_INSTANCE=B
-```
-
-### 4. Verify It's Working
-
-```bash
-# Start Claude Code
 claude
-
-# First message - check for context injection:
-# Should see: "ATTENTION STATE [Turn 1]" with HOT/WARM/COLD counts
-
-# Query pool activity:
-python3 ~/.claude/scripts/pool-query.py --since 1h
 ```
 
-### 5. Create Keywords Config (Required)
-
-Create `.claude/keywords.json` in your project root:
-
-```bash
-cp ~/.claude-cognitive/templates/keywords.json.example .claude/keywords.json
+In Claude Code:
+```
+/cognitive-setup init
 ```
 
-Edit to match your project's documentation files and relevant keywords.
+The wizard analyzes your codebase, generates keyword mappings, creates documentation stubs, configures hooks, and validates everything — with your approval at each step.
 
-**Full setup guide:** [SETUP.md](./SETUP.md)
+### Manual Setup
+
+If you prefer full control, see the step-by-step guide: [SETUP.md](./SETUP.md)
+
 **Customization guide:** [CUSTOMIZATION.md](./CUSTOMIZATION.md)
 
 ---
@@ -341,17 +308,71 @@ Each turn logs:
 
 ---
 
+## Skills (v1.3+)
+
+Claude-cognitive ships with three Claude Code skills for managing the system without leaving your workflow:
+
+### `/cognitive-setup` — Interactive Setup Wizard
+Analyzes your project, generates keyword mappings and documentation stubs, installs hooks, and validates the configuration. Turns manual setup from hours to minutes.
+
+### `/cognitive-status` — Health Check
+Verifies all required files exist, hooks are configured, and the context router is working. Reports clear PASS/FAIL for each component with fix instructions.
+
+### `/cognitive-metrics` — Analytics Dashboard
+Analyzes collected metrics to show token savings, keyword effectiveness, attention dynamics, and coverage gaps. Generates reports and actionable recommendations.
+
+```
+/cognitive-metrics summary     # Quick overview
+/cognitive-metrics full        # Comprehensive report with recommendations
+/cognitive-metrics keywords    # Keyword effectiveness analysis
+/cognitive-metrics coverage    # Documentation coverage gaps
+```
+
+---
+
+## Metrics Framework (v1.3+)
+
+Track whether claude-cognitive is actually delivering value:
+
+- **Token savings**: Per-turn and aggregate measurements of context reduction
+- **Keyword effectiveness**: Which keywords match, which never fire, hit rates
+- **Attention dynamics**: HOT/WARM/COLD distribution and selectivity ratios
+- **Coverage analysis**: Which documentation files are used vs. ignored
+- **Trend detection**: Improvement or decline over time
+
+Data is stored in `.claude/cognitive-metrics/` as JSONL (one file per day). The analyzer can be used standalone:
+
+```bash
+python3 -m scripts.metrics.analyzer --analysis all
+python3 -m scripts.metrics.analyzer --analysis savings --format json
+python3 -m scripts.metrics.reporter --type full --save
+```
+
+Metrics collection integrates automatically via hooks — no manual instrumentation needed.
+
+---
+
 ## Architecture
 
 ```
 claude-cognitive/
 ├── scripts/
-│   ├── context-router-v2.py      # Attention dynamics + history logging
+│   ├── context-router-v2.py      # Attention dynamics + diagnostics + metrics
 │   ├── history.py                # History viewer CLI (v1.1+)
 │   ├── pool-auto-update.py       # Continuous pool updates
 │   ├── pool-loader.py            # SessionStart injection
 │   ├── pool-extractor.py         # Stop hook extraction
-│   └── pool-query.py             # CLI query tool
+│   ├── pool-query.py             # CLI query tool
+│   └── metrics/                  # Analytics framework (v1.3+)
+│       ├── collector.py          # Hook-integrated metrics collection
+│       ├── store.py              # JSONL storage with rotation
+│       ├── analyzer.py           # Statistical analysis
+│       └── reporter.py           # Markdown report generation
+│
+├── .claude/skills/
+│   ├── cognitive-setup/          # Interactive setup wizard
+│   ├── cognitive-status/         # Health check
+│   └── cognitive-metrics/        # Analytics dashboard
 │
 ├── templates/
 │   ├── CLAUDE.md                 # Project context template
@@ -360,19 +381,18 @@ claude-cognitive/
 │   └── integrations/             # Cross-system communication
 │
 └── examples/
-    ├── small-project/            # Simple example
-    ├── monorepo/                 # Complex structure
-    └── mirrorbot-sanitized/      # Real-world 50k+ line example
+    └── small-project/            # Simple example
 ```
 
 **Hooks:**
-- `UserPromptSubmit`: Context router + pool auto-update
-- `SessionStart`: Pool loader
-- `Stop`: Pool extractor (manual blocks)
+- `UserPromptSubmit`: Context router + pool auto-update (metrics collected automatically)
+- `SessionStart`: Pool loader + metrics session init
+- `Stop`: Pool extractor + metrics session summary
 
 **State Files:**
 - `.claude/attn_state.json` - Context router scores
 - `.claude/pool/instance_state.jsonl` - Pool entries
+- `.claude/cognitive-metrics/events/*.jsonl` - Metrics events (v1.3)
 
 **Strategy:** Project-local first, `~/.claude/` fallback (monorepo-friendly)
 
@@ -443,26 +463,32 @@ Need multi-team coordination, compliance features, or custom setup?
 
 ## Roadmap
 
-**v1.1 (Current - Production)**
+**v1.1 (Production)**
 - ✅ Context router with attention dynamics
 - ✅ Pool coordinator (auto + manual)
 - ✅ Project-local strategy
 - ✅ CLI query tools
-- ✅ **Attention history tracking** (NEW in v1.1)
-- ✅ **History viewer CLI** (NEW in v1.1)
+- ✅ Attention history tracking
+- ✅ History viewer CLI
 
-**v1.2 (Next)**
+**v1.3 (Current)**
+- ✅ **`/cognitive-setup` wizard** — Automated project analysis and configuration
+- ✅ **`/cognitive-status` health check** — Configuration validation and diagnostics
+- ✅ **`/cognitive-metrics` analytics** — Token savings, keyword effectiveness, coverage analysis
+- ✅ **Metrics framework** — JSONL-based event collection, analysis, and reporting
+- ✅ **Context router hardening** — Validation mode, diagnostics JSON output, non-silent failure
+- ✅ **Project analyzer** — Automated keyword generation from codebase analysis
+
+**v1.4 (Next)**
 - [ ] Graph visualization of attention flow
 - [ ] Collision detection (multiple instances, same file HOT)
-- [ ] Nemotron compression for pool summaries
-- [ ] Semantic relevance (embeddings vs keywords)
+- [ ] Semantic keyword suggestion from metrics data
+- [ ] Keyword weight auto-tuning from usage patterns
 
 **v2.0 (Future)**
-- [ ] Conflict detection (multiple instances, same file)
-- [ ] Action confirmations (critical operations)
-- [ ] Integration with ES-AC learning (context preferences)
-- [ ] Oracle prediction (which files to pre-load)
-- [ ] Exploring integration with other AI coding assistants (Gemini CLI, Cursor, Aider)
+- [ ] Zero-config graph-based relationship discovery (Hologram)
+- [ ] GUI/dashboard for metrics visualization
+- [ ] Integration with other AI coding assistants (Gemini CLI, Cursor, Aider)
 
 ---
 

@@ -24,9 +24,10 @@ Output: Tiered context to stdout
 import sys
 import json
 import os
+import argparse
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
 # Try to import usage tracker (v1.2 feature, graceful fallback if missing)
@@ -35,6 +36,15 @@ try:
     USAGE_TRACKING_AVAILABLE = True
 except ImportError:
     USAGE_TRACKING_AVAILABLE = False
+
+# Try to import metrics collector (v1.3 feature, graceful fallback)
+try:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from metrics.collector import collect_injection_event
+    from metrics.store import MetricsStore
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
 
 # ============================================================================
 # DOCS ROOT RESOLUTION
@@ -113,7 +123,8 @@ def resolve_docs_root() -> Path:
 # State file location
 PROJECT_STATE = Path(".claude/attn_state.json")
 GLOBAL_STATE = Path.home() / ".claude" / "attn_state.json"
-HISTORY_FILE = Path.home() / ".claude" / "attention_history.jsonl"
+PROJECT_HISTORY = Path(".claude/attention_history.jsonl")
+GLOBAL_HISTORY = Path.home() / ".claude" / "attention_history.jsonl"
 
 # History retention
 MAX_HISTORY_DAYS = 30  # Archive entries older than 30 days
@@ -154,12 +165,12 @@ PINNED_FILES = [
 # Load keywords and co-activation from external config if available
 # ============================================================================
 
-def load_keyword_config() -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
+def load_keyword_config() -> Tuple[Dict[str, List[str]], Dict[str, List[str]], List[str]]:
     """
-    Load keywords and co-activation graph from keywords.json (JSON).
+    Load keywords, co-activation graph, and pinned files from keywords.json (JSON).
     Falls back to hardcoded defaults if config doesn't exist or fails to parse.
 
-    Returns: (keywords_dict, co_activation_dict)
+    Returns: (keywords_dict, co_activation_dict, pinned_list)
     """
     # Try project-local config first, then global
     config_paths = [
@@ -170,21 +181,64 @@ def load_keyword_config() -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
     for config_path in config_paths:
         if config_path.exists():
             try:
-                config = json.loads(config_path.read_text())
-                keywords = config.get("keywords", {})
-                co_activation = config.get("co_activation", {})
-
-                # Validate structure
-                if keywords and isinstance(keywords, dict):
-                    print(f"✓ Loaded keywords from {config_path}", file=sys.stderr)
-                    return keywords, co_activation
-            except (json.JSONDecodeError, Exception) as e:
-                print(f"⚠ Failed to load {config_path}: {e}", file=sys.stderr)
+                raw = config_path.read_text()
+                config = json.loads(raw)
+            except json.JSONDecodeError as e:
+                print(
+                    f"⚠ Malformed keywords.json at {config_path}: {e}\n"
+                    f"  Fix the JSON syntax or delete the file to use defaults.\n"
+                    f"  Hint: validate with: python3 -m json.tool {config_path}",
+                    file=sys.stderr
+                )
                 continue
+            except Exception as e:
+                print(f"⚠ Failed to read {config_path}: {e}", file=sys.stderr)
+                continue
+
+            keywords = config.get("keywords", {})
+            co_activation = config.get("co_activation", {})
+            pinned = config.get("pinned", [])
+
+            # Validate structure
+            if not isinstance(keywords, dict):
+                print(
+                    f"⚠ Invalid keywords.json: 'keywords' must be an object, "
+                    f"got {type(keywords).__name__}",
+                    file=sys.stderr
+                )
+                continue
+
+            if not keywords:
+                print(
+                    f"⚠ keywords.json at {config_path} has empty 'keywords' object.\n"
+                    f"  Add keyword mappings or the context router will not activate any files.",
+                    file=sys.stderr
+                )
+
+            # Validate keyword values are lists of strings
+            issues = []
+            for file_path, kw_list in keywords.items():
+                if not isinstance(kw_list, list):
+                    issues.append(f"  '{file_path}': value must be a list, got {type(kw_list).__name__}")
+                elif not kw_list:
+                    issues.append(f"  '{file_path}': empty keyword list (file will never activate)")
+
+            if issues:
+                print(
+                    f"⚠ keywords.json issues at {config_path}:\n" +
+                    "\n".join(issues[:5]),
+                    file=sys.stderr
+                )
+
+            print(
+                f"✓ Loaded {len(keywords)} keyword mappings from {config_path}",
+                file=sys.stderr
+            )
+            return keywords, co_activation, pinned
 
     # Fallback to hardcoded (will be defined below as _DEFAULT_KEYWORDS)
     print("ℹ Using hardcoded keywords (no keywords.json found)", file=sys.stderr)
-    return _DEFAULT_KEYWORDS, _DEFAULT_CO_ACTIVATION
+    return _DEFAULT_KEYWORDS, _DEFAULT_CO_ACTIVATION, []
 
 # ============================================================================
 # KEYWORD MAPPINGS
@@ -417,7 +471,11 @@ _DEFAULT_CO_ACTIVATION: Dict[str, List[str]] = {
 }
 
 # Load actual configuration (from keywords.json or fallback to defaults)
-KEYWORDS, CO_ACTIVATION = load_keyword_config()
+KEYWORDS, CO_ACTIVATION, _CONFIGURED_PINNED = load_keyword_config()
+
+# Merge configured pinned files with hardcoded defaults
+if _CONFIGURED_PINNED:
+    PINNED_FILES = list(set(PINNED_FILES + _CONFIGURED_PINNED))
 
 # ============================================================================
 # STATE MANAGEMENT
@@ -429,6 +487,14 @@ def get_state_file() -> Path:
         return PROJECT_STATE
     GLOBAL_STATE.parent.mkdir(parents=True, exist_ok=True)
     return GLOBAL_STATE
+
+
+def get_history_file() -> Path:
+    """Get appropriate history file (project-local preferred)."""
+    if PROJECT_HISTORY.parent.exists():
+        return PROJECT_HISTORY
+    GLOBAL_HISTORY.parent.mkdir(parents=True, exist_ok=True)
+    return GLOBAL_HISTORY
 
 
 def load_state(state_file: Path) -> dict:
@@ -443,13 +509,13 @@ def load_state(state_file: Path) -> dict:
     return {
         "scores": {path: 0.0 for path in KEYWORDS},
         "turn_count": 0,
-        "last_update": datetime.now().isoformat(),
+        "last_update": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def save_state(state_file: Path, state: dict) -> None:
     """Save attention state to file."""
-    state["last_update"] = datetime.now().isoformat()
+    state["last_update"] = datetime.now(timezone.utc).isoformat()
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state, indent=2))
 
@@ -650,7 +716,7 @@ def append_history(state: dict, prev_state: dict, activated: Set[str], prompt: s
 
     entry = {
         "turn": state["turn_count"],
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "instance_id": os.environ.get("CLAUDE_INSTANCE", "default"),
         "prompt_keywords": words,
         "activated": sorted(list(activated)),
@@ -662,12 +728,12 @@ def append_history(state: dict, prev_state: dict, activated: Set[str], prompt: s
     }
 
     try:
-        # Ensure history file exists
-        if not HISTORY_FILE.exists():
-            HISTORY_FILE.parent.mkdir(exist_ok=True)
-            HISTORY_FILE.touch()
+        history_file = get_history_file()
+        if not history_file.exists():
+            history_file.parent.mkdir(exist_ok=True)
+            history_file.touch()
 
-        with open(HISTORY_FILE, "a") as f:
+        with open(history_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:
         pass  # Don't fail hook on history write error
@@ -677,27 +743,116 @@ def append_history(state: dict, prev_state: dict, activated: Set[str], prompt: s
 # MAIN ENTRY POINT
 # ============================================================================
 
+def build_diagnostics(state: dict, activated: Set[str], stats: dict, prompt: str, docs_root: Path) -> dict:
+    """Build a JSON diagnostics summary for debugging and validation."""
+    total_files = len(state.get("scores", {}))
+    return {
+        "turn": state.get("turn_count", 0),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "docs_root": str(docs_root),
+        "prompt_length": len(prompt),
+        "prompt_preview": prompt[:100],
+        "total_managed_files": total_files,
+        "keywords_loaded": len(KEYWORDS),
+        "files_checked": total_files,
+        "directly_activated": sorted(list(activated)),
+        "hot_files": sorted([p for p, s in state["scores"].items() if get_tier(s) == "HOT"]),
+        "warm_files": sorted([p for p, s in state["scores"].items() if get_tier(s) == "WARM"]),
+        "cold_files": sorted([p for p, s in state["scores"].items() if get_tier(s) == "COLD"]),
+        "stats": stats,
+        "has_activation": stats.get("hot", 0) > 0 or stats.get("warm", 0) > 0,
+        "output_chars": stats.get("total_chars", 0),
+    }
+
+
+def run_validation(prompt: str) -> dict:
+    """
+    Run a dry-run validation against a test prompt.
+    Does NOT modify state files. Returns diagnostics.
+    """
+    try:
+        docs_root = resolve_docs_root()
+    except FileNotFoundError as e:
+        return {"error": str(e), "status": "FAIL"}
+
+    # Load state but don't save
+    state_file = get_state_file()
+    state = load_state(state_file)
+    prev_state = json.loads(json.dumps(state))
+
+    state, activated = update_attention(state, prompt)
+    output, stats = build_context_output(state, docs_root)
+    stats["total_chars"] = len(output)
+
+    diag = build_diagnostics(state, activated, stats, prompt, docs_root)
+    diag["mode"] = "validation (dry-run)"
+
+    if diag["has_activation"]:
+        diag["status"] = "PASS"
+        diag["message"] = (
+            f"Prompt activated {len(diag['directly_activated'])} file(s). "
+            f"Router would inject {stats['hot']} HOT + {stats['warm']} WARM files "
+            f"({stats['total_chars']:,} chars)."
+        )
+    else:
+        diag["status"] = "WARN"
+        diag["message"] = (
+            f"No files activated for this prompt. "
+            f"Check that keywords in keywords.json match terms in your prompt. "
+            f"Managed files: {diag['total_managed_files']}, Keywords loaded: {diag['keywords_loaded']}"
+        )
+
+    return diag
+
+
 def main():
     """
     Main entry point for Claude Code hook.
     Reads JSON from stdin, outputs tiered context to stdout.
+
+    CLI modes:
+      (default)        Hook mode — reads JSON from stdin, outputs context
+      --validate       Dry-run validation with a test prompt (no state mutation)
+      --diagnostics    Output JSON diagnostics instead of context
     """
-    # Parse input
+    # Parse CLI arguments (doesn't interfere with stdin hook mode)
+    parser = argparse.ArgumentParser(description="Attentional Context Router v2.0", add_help=False)
+    parser.add_argument("--validate", type=str, metavar="PROMPT",
+                        help="Dry-run validation with a test prompt (no state changes)")
+    parser.add_argument("--diagnostics", action="store_true",
+                        help="Output JSON diagnostics instead of formatted context")
+    args, _ = parser.parse_known_args()
+
+    # Validation mode: dry-run with test prompt
+    if args.validate:
+        result = run_validation(args.validate)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result.get("status") != "FAIL" else 1)
+
+    # Standard hook mode: read from stdin
+    raw = sys.stdin.read() if sys.stdin else ""
     try:
-        input_data = json.loads(sys.stdin.read())
+        input_data = json.loads(raw)
         prompt = input_data.get("prompt", "")
     except json.JSONDecodeError:
         # Fallback: treat entire stdin as prompt
-        prompt = sys.stdin.read() if sys.stdin else ""
-    
+        prompt = raw
+
     if not prompt.strip():
         return
 
     # Determine docs root with proper priority order
-    # Priority 1: Explicit CONTEXT_DOCS_ROOT environment variable
-    # Priority 2: Project-local .claude/ (if exists with .md files)
-    # Priority 3: Global ~/.claude/
-    docs_root = resolve_docs_root()
+    try:
+        docs_root = resolve_docs_root()
+    except FileNotFoundError as e:
+        # Emit a user-visible diagnostic instead of silent failure
+        print(
+            f"## Context Router - Configuration Required\n\n"
+            f"The context router could not find documentation files.\n\n"
+            f"{e}\n\n"
+            f"Run `/cognitive-setup` to configure claude-cognitive for this project."
+        )
+        return
 
     # Load state
     state_file = get_state_file()
@@ -711,18 +866,28 @@ def main():
     output, stats = build_context_output(state, docs_root)
     stats["total_chars"] = len(output)  # Add total chars to stats
 
+    # Diagnostics mode: output JSON instead of formatted context (no state mutation)
+    if args.diagnostics:
+        diag = build_diagnostics(state, activated, stats, prompt, docs_root)
+        print(json.dumps(diag, indent=2))
+        return
+
+    # Emit compact status to stderr (visible to user in terminal)
+    hot_names = ", ".join(sorted(p.split("/")[-1].replace(".md","") for p,s in state["scores"].items() if get_tier(s) == "HOT")[:3]) or "none"
+    sys.stderr.write(f"[cognitive] Turn {state['turn_count']} | HOT: {stats['hot']} WARM: {stats['warm']} COLD: {stats['cold']} | {len(output):,} chars | hot: {hot_names}\n")
+
     # Append to history log (before save, so turn_count is correct)
     append_history(state, prev_state, activated, prompt, stats)
 
     # Save state for next turn
     save_state(state_file, state)
-    
-    # Log injection for debugging (append-only)
-    log_file = Path.home() / ".claude" / "context_injection.log"
+
+    # Log injection for debugging (append-only, project-local preferred)
+    log_file = Path(".claude/context_injection.log") if Path(".claude").exists() else Path.home() / ".claude" / "context_injection.log"
     try:
         with open(log_file, "a") as f:
             f.write(f"\n{'='*80}\n")
-            f.write(f"[{datetime.now().isoformat()}] Turn {state['turn_count']}\n")
+            f.write(f"[{datetime.now(timezone.utc).isoformat()}] Turn {state['turn_count']}\n")
             f.write(f"Prompt (first 100 chars): {prompt[:100]}...\n")
             f.write(f"Stats: Hot={stats['hot']}, Warm={stats['warm']}, Cold={stats['cold']}\n")
             f.write(f"Total chars: {len(output):,}\n")
@@ -730,13 +895,29 @@ def main():
             f.write(f"{'='*80}\n")
             f.write(output)
             f.write(f"\n{'='*80}\n\n")
-    except Exception as e:
-        # Don't fail hook if logging fails
-        pass
+    except Exception:
+        pass  # Don't fail hook if logging fails
+
+    # Collect metrics (v1.3)
+    if METRICS_AVAILABLE:
+        try:
+            event = collect_injection_event(prompt, output, state)
+            MetricsStore().append(event)
+        except Exception:
+            pass  # Don't fail hook if metrics fails
 
     # Output to Claude Code
     if stats["hot"] > 0 or stats["warm"] > 0:
         print(output)
+    elif state["turn_count"] <= 3:
+        # On first few turns, emit a helpful diagnostic if nothing activates
+        # This replaces the silent failure that confused users
+        print(
+            f"## Context Router Active (Turn {state['turn_count']})\n\n"
+            f"No documentation files matched keywords in this prompt.\n"
+            f"The router is monitoring {len(KEYWORDS)} keyword-mapped files.\n"
+            f"Mention project-specific terms to activate relevant context.\n"
+        )
 
 
 if __name__ == "__main__":
