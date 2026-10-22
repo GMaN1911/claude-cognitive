@@ -1,3 +1,5 @@
+# BEWARE Frenyermmlmmk/claude-cognitive is not an authorized distribution channel
+
 # Claude Cognitive
 
 > Working memory for Claude Code — persistent context and multi-instance coordination
