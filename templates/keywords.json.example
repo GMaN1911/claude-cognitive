@@ -1,22 +1,45 @@
 {
+  "_comment": "Example keywords.json for different project types. Replace with your own.",
+
   "keywords": {
     "systems/development.md": [
       "development", "dev", "local", "localhost",
       "database", "migration", "test", "debug"
     ],
     "systems/production.md": [
-      "production", "prod", "deploy", "hosting", "ci/cd"
+      "production", "prod", "deploy", "hosting", "ci/cd",
+      "staging", "infrastructure", "monitoring"
     ],
-    "modules/your-feature.md": [
-      "feature-name", "related-terms", "class-names", "function-names"
+
+    "modules/auth.md": [
+      "auth", "authentication", "login", "logout", "session",
+      "jwt", "token", "password", "oauth", "permissions", "rbac"
     ],
-    "integrations/external-api.md": [
-      "api-name", "webhook", "integration"
+    "modules/api.md": [
+      "api", "endpoint", "route", "handler", "middleware",
+      "request", "response", "rest", "graphql", "controller"
+    ],
+    "modules/database.md": [
+      "database", "db", "query", "schema", "model",
+      "migration", "orm", "sql", "table", "index"
+    ],
+
+    "integrations/payment-gateway.md": [
+      "stripe", "payment", "checkout", "billing",
+      "subscription", "invoice", "webhook"
+    ],
+    "integrations/email-service.md": [
+      "email", "smtp", "sendgrid", "notification",
+      "template", "mailer"
     ]
   },
+
   "co_activation": {
-    "modules/your-feature.md": ["systems/development.md"],
-    "integrations/external-api.md": ["modules/your-feature.md"]
+    "modules/auth.md": ["modules/api.md", "modules/database.md"],
+    "modules/api.md": ["modules/auth.md", "systems/production.md"],
+    "integrations/payment-gateway.md": ["modules/api.md", "modules/database.md"],
+    "integrations/email-service.md": ["modules/auth.md"]
   },
+
   "pinned": ["systems/development.md"]
 }

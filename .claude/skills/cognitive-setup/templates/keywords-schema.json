@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "claude-cognitive keywords.json",
+  "description": "Keyword-to-documentation mappings for the attentional context router",
+  "type": "object",
+  "required": ["keywords"],
+  "properties": {
+    "keywords": {
+      "type": "object",
+      "description": "Maps documentation file paths (relative to .claude/) to arrays of trigger keywords",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 2
+        },
+        "minItems": 1
+      }
+    },
+    "co_activation": {
+      "type": "object",
+      "description": "Maps documentation file paths to arrays of related files that should boost when the key file activates",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "pinned": {
+      "type": "array",
+      "description": "File paths that should always maintain at least WARM attention level",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

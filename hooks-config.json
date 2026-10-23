@@ -20,6 +20,11 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/scripts/pool-loader.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/scripts/metrics/collector.py session-start",
+            "async": true
           }
         ]
       }
@@ -30,6 +35,11 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/scripts/pool-extractor.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/scripts/metrics/collector.py session-end",
+            "async": true
           }
         ]
       }
